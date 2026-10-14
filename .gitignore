@@ -1,0 +1,5 @@
+.build/
+build/
+*.png
+!docs/*.png
+docs/frames/
