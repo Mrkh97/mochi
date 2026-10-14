@@ -4,7 +4,7 @@
 
 <p align="center">A cat that lives on your desktop. She walks on your windows, hides behind them, naps on them,<br>slips off their edges, and expects to be fed.</p>
 
-<p align="center"><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi.zip"><b>Download for macOS</b></a> · macOS 14 Sonoma or later · Apple silicon and Intel<br><a href="#install-on-windows"><b>Windows</b></a> 10 and 11 · Intel/AMD (x64) and ARM64 · build from source</p>
+<p align="center"><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi.zip"><b>Download for macOS</b></a> · macOS 14 Sonoma or later · Apple silicon and Intel<br><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi-Setup.exe"><b>Download for Windows</b></a> · Windows 10 and 11 · Intel/AMD and ARM</p>
 
 ![Seven cats on a desktop: one strolls along a window, one dangles from a window's edge, one is petted, one peeks over a window from behind, one plays with a yarn ball, one eats, and one sleeps in a cardboard box](docs/demo.gif)
 
@@ -56,9 +56,25 @@ Quit Mochi from its menu and drag Mochi.app to the Trash. To also forget its set
 
 ## Install on Windows
 
-Mochi runs on Windows 10 and 11, on both Intel/AMD (x64) and ARM64 PCs. There's no ready-made download for Windows yet, so you build it once from source. Most of the time goes on installing the tools.
+Mochi runs on Windows 10 and 11, on Intel/AMD (x64) and ARM PCs. One installer covers both; it picks the right build for your PC.
 
-1. **Install the tools.** Open PowerShell and run:
+### Download
+
+1. Download [**Mochi-Setup.exe**](https://github.com/Mrkh97/mochi/releases/latest/download/Mochi-Setup.exe) from the [latest release](https://github.com/Mrkh97/mochi/releases/latest) and open it.
+2. Mochi isn't signed with a paid certificate, so Windows may say **Windows protected your PC**. Click **More info**, then **Run anyway**. (Your browser may also ask whether to keep the download.)
+3. Click **Next**, then **Finish**. It installs just for you, so it doesn't ask for administrator rights. Leave **Start Mochi when I sign in** ticked to have her start with Windows (you can change this later with **Open at Login** in her menu).
+4. Look for the cat face in the notification area at the right end of the taskbar. That's where all the settings are. Windows hides new icons under the **^** at first; drag it onto the taskbar to keep it in view.
+
+To update, download and run the newest installer; it closes Mochi, keeps your cats and starts her again.
+
+Everything works as on the Mac, with two differences:
+
+- **Slips Wobble Real Windows** needs no permission on Windows. It can't move windows of apps running as administrator.
+- Mochi sizes everything for your main display's scaling. On a second display with different scaling, cats look a little bigger or smaller there.
+
+### Build from source
+
+1. Install the tools. In PowerShell:
 
    ```powershell
    winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100"
@@ -66,9 +82,9 @@ Mochi runs on Windows 10 and 11, on both Intel/AMD (x64) and ARM64 PCs. There's 
    winget install --id Git.Git --exact
    ```
 
-   These are the Visual C++ build tools with a Windows SDK, the [Swift toolchain](https://www.swift.org/install/windows/) and Git. winget picks the right versions for your PC.
+   These are the Visual C++ build tools with a Windows SDK, the [Swift toolchain](https://www.swift.org/install/windows/) and Git.
 
-2. **Build and install Mochi.** Close PowerShell and open a new window, so it finds `swift` and `git`. Then run:
+2. Open a new PowerShell window (so it finds `swift` and `git`) and run:
 
    ```powershell
    git clone https://github.com/Mrkh97/mochi.git
@@ -76,33 +92,25 @@ Mochi runs on Windows 10 and 11, on both Intel/AMD (x64) and ARM64 PCs. There's 
    powershell -ExecutionPolicy Bypass -File .\build.ps1 -Install
    ```
 
-   This builds Mochi for your PC, copies it to `%LOCALAPPDATA%\Programs\Mochi` and starts it. The first build takes a few minutes. Windows doesn't run downloaded scripts by default; `-ExecutionPolicy Bypass` allows just this one.
+   This builds Mochi for your PC, copies it to `%LOCALAPPDATA%\Programs\Mochi` and starts it. Windows doesn't run downloaded scripts by default; `-ExecutionPolicy Bypass` allows just this one.
 
-3. **Find the cat face** in the notification area at the right end of the taskbar. That's where all the settings are. Windows hides new icons under the **^** at first; drag it onto the taskbar to keep it in view.
-
-To start Mochi with Windows, turn on **Open at Login** in its menu. To update, run `git pull` and the build command again.
-
-Everything works as on the Mac, with two differences:
-
-- **Slips Wobble Real Windows** needs no permission on Windows. It can't move windows of apps running as administrator.
-- Mochi sizes everything for your main display's scaling. On a second display with different scaling, cats look a little bigger or smaller there.
-
-### Copying it to other PCs
-
-`build\Mochi` holds `Mochi.exe` plus the Swift and Visual C++ runtime DLLs it needs, so you can copy that folder to any PC of the same kind and run it there without installing anything. The build script has a few options (start each line with `powershell -ExecutionPolicy Bypass -File` as above if Windows won't run it):
+`build.ps1` puts its result in `build\Mochi-<arch>`: `Mochi.exe` plus the Swift and Visual C++ runtime DLLs it needs, so that folder runs on any PC of the same kind without installing anything. Its options (start each line with `powershell -ExecutionPolicy Bypass -File` as above if Windows won't run it):
 
 ```powershell
-.\build.ps1                  # just build build\Mochi, for this PC
+.\build.ps1                  # just build, for this PC
 .\build.ps1 -Arch x64        # build for Intel/AMD PCs (works from an ARM PC too)
 .\build.ps1 -Arch arm64      # build for ARM PCs (works from an Intel/AMD PC too)
 .\build.ps1 -Release         # also zip it as build\Mochi-windows-<arch>.zip
+.\build.ps1 -Installer       # build for both and make build\Mochi-Setup.exe
 ```
 
-An x64 build also runs on ARM PCs (Windows emulates it), but the ARM64 build is faster there.
+`-Installer` needs [Inno Setup](https://jrsoftware.org/isinfo.php) (`winget install --id JRSoftware.InnoSetup --exact`); the installer script is `windows\Mochi.iss`.
 
 ### Uninstall
 
-Turn off **Open at Login** if you'd turned it on, quit Mochi from its menu, and delete `%LOCALAPPDATA%\Programs\Mochi`. To also forget its settings, delete `%LOCALAPPDATA%\Mochi.exe.plist`.
+Open **Settings → Apps → Installed apps**, find **Mochi** and choose **Uninstall**. That also removes its settings.
+
+If you installed with `build.ps1 -Install` instead, turn off **Open at Login**, quit Mochi from its menu, and delete `%LOCALAPPDATA%\Programs\Mochi`. To also forget its settings, delete `%LOCALAPPDATA%\Mochi.exe.plist`.
 
 ## What she does
 

@@ -3,3 +3,4 @@ build/
 *.png
 !docs/*.png
 docs/frames/
+!windows/*.png
