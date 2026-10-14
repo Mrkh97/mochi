@@ -1,4 +1,4 @@
-import CoreGraphics
+import Foundation
 
 func rgb(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
     CGColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255,

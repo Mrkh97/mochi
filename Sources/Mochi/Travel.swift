@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 // MARK: - Getting from one display to another
 

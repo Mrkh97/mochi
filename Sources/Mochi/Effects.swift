@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 enum FXKind { case heart, z, sweat, exclaim, dust, note, sparkle, anger, word, crumb, drop }
 
@@ -11,7 +11,7 @@ struct Particle {
     var size: CGFloat
     var seed: CGFloat = .random(in: 0...6.28)
     var text: String = ""
-    var color: NSColor = .labelColor
+    var color: Ink = .systemBrown
 }
 
 /// Little floating bits of emotion around a cat.
@@ -24,7 +24,7 @@ final class Effects {
     }
 
     /// A little word bubble ("MEOW!", "hss!", "nom").
-    func say(_ text: String, at p: CGPoint, color: NSColor, life: CGFloat = 1.3) {
+    func say(_ text: String, at p: CGPoint, color: Ink, life: CGFloat = 1.3) {
         spawn(.word, at: p, v: CGPoint(x: .random(in: -6...6), y: 22), life: life)
         items[items.count - 1].text = text
         items[items.count - 1].color = color
@@ -79,9 +79,9 @@ final class Effects {
             ctx.setAlpha(alpha)
             switch it.kind {
             case .heart: drawHeart(ctx)
-            case .z: text(ctx, t < 0.5 ? "z" : "Z", 11 + t * 6, NSColor(srgbRed: 0.45, green: 0.56, blue: 0.82, alpha: 1))
-            case .note: text(ctx, "♪", 13, NSColor(srgbRed: 0.85, green: 0.45, blue: 0.7, alpha: 1))
-            case .exclaim: text(ctx, "!", 17, NSColor(srgbRed: 0.95, green: 0.35, blue: 0.35, alpha: 1))
+            case .z: platform.drawText(t < 0.5 ? "z" : "Z", size: 11 + t * 6, ink: .srgb(0.45, 0.56, 0.82), in: ctx)
+            case .note: platform.drawText("♪", size: 13, ink: .srgb(0.85, 0.45, 0.7), in: ctx)
+            case .exclaim: platform.drawText("!", size: 17, ink: .srgb(0.95, 0.35, 0.35), in: ctx)
             case .sweat: drawSweat(ctx)
             case .dust:
                 ctx.setFillColor(rgb(0xE6DFD5, 0.9))
@@ -89,7 +89,7 @@ final class Effects {
                 ctx.fillEllipse(in: CGRect(x: -r, y: -r, width: r * 2, height: r * 2))
             case .sparkle: drawSparkle(ctx)
             case .anger: drawAnger(ctx)
-            case .word: text(ctx, it.text, 12, it.color)
+            case .word: platform.drawText(it.text, size: 12, ink: it.color, in: ctx)
             case .crumb:
                 ctx.setFillColor(rgb(0x9A5B2E))
                 ctx.fillEllipse(in: CGRect(x: -1.6, y: -1.3, width: 3.2, height: 2.6))
@@ -99,30 +99,6 @@ final class Effects {
             }
             ctx.restoreGState()
         }
-    }
-
-    /// Rendered glyph strings, cached: building a rounded font every frame was the most expensive part of drawing.
-    private static var cache: [String: (CTLine, CGSize)] = [:]
-
-    private func text(_ ctx: CGContext, _ s: String, _ size: CGFloat, _ color: NSColor) {
-        let key = "\(s)|\(Int(size))|\(color.hashValue)"
-        let entry: (CTLine, CGSize)
-        if let e = Effects.cache[key] {
-            entry = e
-        } else {
-            let font = NSFont.systemFont(ofSize: CGFloat(Int(size)), weight: .heavy)
-            let rounded = font.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: CGFloat(Int(size))) } ?? font
-            let str = NSAttributedString(string: s, attributes: [
-                .font: rounded, .foregroundColor: color,
-                .strokeColor: NSColor.white, .strokeWidth: -3.0,
-            ])
-            let line = CTLineCreateWithAttributedString(str)
-            let b = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
-            entry = (line, b.size)
-            Effects.cache[key] = entry
-        }
-        ctx.textPosition = CGPoint(x: -entry.1.width / 2, y: -entry.1.height / 2)
-        CTLineDraw(entry.0, ctx)
     }
 
     private func drawHeart(_ ctx: CGContext) {

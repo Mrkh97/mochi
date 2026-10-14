@@ -1,4 +1,4 @@
-import CoreGraphics
+import Foundation
 
 /// Which way we are looking at the cat.
 enum ViewKind { case side, front }

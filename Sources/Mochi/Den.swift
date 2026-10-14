@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 /// The household: every cat plus their box, bowls and toy.
 final class Den {

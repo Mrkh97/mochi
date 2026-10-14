@@ -1,44 +1,4 @@
-import AppKit
-
-/// A view that renders on the CPU into its own bitmap and hands the layer a finished image
-/// (letting AppKit draw directly made macOS reserve hundreds of MB of GPU buffers).
-/// An offscreen bitmap in the window's own colour space. Drawing in sRGB on a P3 display made
-/// Core Animation convert every pixel of every frame on the CPU, which was most of our CPU time.
-func displayBitmap(reuse old: CGContext?, width w: Int, height h: Int, window: NSWindow?) -> CGContext? {
-    let space = window?.colorSpace?.cgColorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
-    if let old, old.width == w, old.height == h, old.colorSpace == space { return old }
-    return CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                     bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
-}
-
-class BitmapView: NSView {
-    // Two bitmaps used alternately, so drawing a frame never forces a copy of the one on screen.
-    private var bitmaps: [CGContext?] = [nil, nil]
-    private var current = 0
-    override var isFlipped: Bool { false }
-    override var wantsUpdateLayer: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    /// Draw in view points, y up.
-    func render(_ ctx: CGContext) {}
-
-    override func updateLayer() {
-        guard let layer else { return }
-        let scale = window?.backingScaleFactor ?? 2
-        let w = Int(bounds.width * scale), h = Int(bounds.height * scale)
-        guard w > 0, h > 0 else { return }
-        current ^= 1
-        bitmaps[current] = displayBitmap(reuse: bitmaps[current], width: w, height: h, window: window)
-        guard let ctx = bitmaps[current] else { return }
-        ctx.clear(CGRect(x: 0, y: 0, width: w, height: h))
-        ctx.saveGState()
-        ctx.scaleBy(x: scale, y: scale)
-        render(ctx)
-        ctx.restoreGState()
-        layer.contentsScale = scale
-        layer.contents = ctx.makeImage()
-    }
-}
+import Foundation
 
 /// Food and water. Cats get hungry and thirsty; you keep these topped up.
 final class Bowls {
@@ -47,7 +7,7 @@ final class Bowls {
     static let foodX: CGFloat = 50
     static let waterX: CGFloat = 112
 
-    let panel: CatPanel
+    let sprite: Sprite
     private let view: BowlsView
     private(set) var scale: CGFloat
     private(set) var originCG: CGPoint
@@ -73,9 +33,9 @@ final class Bowls {
         } else {
             originCG = CGPoint(x: defaultBottomRight.x - size.width, y: defaultBottomRight.y - size.height)
         }
-        panel = CatPanel(size: size)
-        view = BowlsView(frame: NSRect(origin: .zero, size: size))
-        panel.contentView = view
+        sprite = platform.makeSprite(size: size)
+        view = BowlsView()
+        sprite.content = view
         view.bowls = self
         applyLevel()
         place()
@@ -84,7 +44,7 @@ final class Bowls {
     var frameCG: CGRect {
         CGRect(origin: originCG, size: CGSize(width: Bowls.viewSize.width * scale, height: Bowls.viewSize.height * scale))
     }
-    var level: NSWindow.Level { floating ? .floating : .desktopCat }
+    var level: SpriteLevel { floating ? .floating : .desktop }
 
     private func local(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
         CGPoint(x: originCG.x + x * scale, y: originCG.y + (Bowls.viewSize.height - y) * scale)
@@ -124,7 +84,7 @@ final class Bowls {
         defaults.set(Double(food), forKey: "food")
         defaults.set(Double(water), forKey: "water")
         onChanged?()
-        view.needsDisplay = true
+        sprite.setNeedsDisplay()
     }
 
     func update(_ dt: CGFloat) {
@@ -136,15 +96,14 @@ final class Bowls {
             animating = true
         }
         // Redraw while something moves: a refill pour, or the bobbing "!" over an empty bowl.
-        if animating || food < 0.03 || water < 0.03 { view.needsDisplay = true }
+        if animating || food < 0.03 || water < 0.03 { sprite.setNeedsDisplay() }
     }
 
     func setScale(_ s: CGFloat) {
         let bottomLeft = CGPoint(x: frameCG.minX, y: frameCG.maxY)
         scale = s
         let size = CGSize(width: Bowls.viewSize.width * s, height: Bowls.viewSize.height * s)
-        panel.setContentSize(size)
-        view.frame = NSRect(origin: .zero, size: size)
+        sprite.size = size
         originCG = CGPoint(x: bottomLeft.x, y: bottomLeft.y - size.height)
         place()
     }
@@ -156,17 +115,17 @@ final class Bowls {
     }
 
     func place() {
-        panel.setFrameOrigin(Coords.cocoa(fromCG: frameCG).origin)
+        sprite.origin = originCG
         World.shared.bowlsSurface = surface
-        view.needsDisplay = true
+        sprite.setNeedsDisplay()
     }
 
-    func show() { panel.orderFrontRegardless() }
-    func hide() { panel.orderOut(nil) }
+    func show() { sprite.orderFront() }
+    func hide() { sprite.orderOut() }
 
     private func applyLevel() {
-        panel.level = level
-        if panel.isVisible { panel.orderFrontRegardless() }
+        sprite.level = level
+        if sprite.isShown { sprite.orderFront() }
         World.shared.bowlsSurface = surface
     }
 
@@ -188,7 +147,7 @@ final class Bowls {
 
     func updateMouse(_ m: CGPoint) {
         let over = hitRect.contains(m) || press != nil
-        if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
+        if sprite.clickThrough == over { sprite.clickThrough = !over }
     }
 
     func mouseDown() {
@@ -214,16 +173,16 @@ final class Bowls {
     }
 }
 
-final class BowlsView: BitmapView {
+final class BowlsView: SpriteContent {
     weak var bowls: Bowls?
 
-    override func mouseDown(with event: NSEvent) { bowls?.mouseDown() }
-    override func mouseDragged(with event: NSEvent) { bowls?.mouseDragged() }
-    override func mouseUp(with event: NSEvent) { bowls?.mouseUp() }
+    func mouseDown() { bowls?.mouseDown() }
+    func mouseDragged() { bowls?.mouseDragged() }
+    func mouseUp() { bowls?.mouseUp() }
 
     private static let line = rgb(0x6B4A3A)
 
-    override func render(_ ctx: CGContext) {
+    func draw(_ ctx: CGContext) {
         guard let b = bowls else { return }
         Self.paint(ctx, scale: b.scale, food: b.food, water: b.water, refillT: b.refillT, time: b.time)
     }

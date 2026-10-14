@@ -1,12 +1,13 @@
-import AppKit
+import Foundation
 
 /// One cat: its window, body, position in the world and current activity.
-final class Cat {
+final class Cat: SpriteContent {
     var name: String
     var coat: Coat
     private(set) var scale: CGFloat
-    let panel: CatPanel
-    let view: CatView
+    let sprite: Sprite
+    /// The contact point inside the sprite, in its points (y up).
+    private(set) var anchor: CGPoint
     let effects = Effects()
     unowned let home: HomeBox
     var activity: CGFloat = 1          // 0.6 sleepy … 1.6 playful
@@ -62,6 +63,7 @@ final class Cat {
     // Mouse
     private var press: CGPoint?
     private(set) var dragging = false
+    var onContextMenu: (() -> Void)?
 
     static let testMode = ProcessInfo.processInfo.environment["MOCHI_TEST"] != nil
     static let debug = ProcessInfo.processInfo.environment["MOCHI_DEBUG"] != nil
@@ -74,20 +76,16 @@ final class Cat {
         self.coat = coat
         self.scale = scale
         self.home = home
-        panel = CatPanel(size: CGSize(width: Cat.viewSize.width * scale, height: Cat.viewSize.height * scale))
-        view = CatView(frame: NSRect(origin: .zero, size: panel.frame.size))
-        view.anchor = CGPoint(x: Cat.anchor.x * scale, y: Cat.anchor.y * scale)
-        panel.contentView = view
-        view.cat = self
+        sprite = platform.makeSprite(size: CGSize(width: Cat.viewSize.width * scale, height: Cat.viewSize.height * scale))
+        anchor = CGPoint(x: Cat.anchor.x * scale, y: Cat.anchor.y * scale)
         energy = .random(in: 0.7...0.95)
+        sprite.content = self
     }
 
     func setScale(_ s: CGFloat) {
         scale = s
-        let size = CGSize(width: Cat.viewSize.width * s, height: Cat.viewSize.height * s)
-        panel.setContentSize(size)
-        view.frame = NSRect(origin: .zero, size: size)
-        view.anchor = CGPoint(x: Cat.anchor.x * s, y: Cat.anchor.y * s)
+        sprite.size = CGSize(width: Cat.viewSize.width * s, height: Cat.viewSize.height * s)
+        anchor = CGPoint(x: Cat.anchor.x * s, y: Cat.anchor.y * s)
     }
 
     var world: World { World.shared }
@@ -124,13 +122,13 @@ final class Cat {
     func update(_ dt: CGFloat) {
         time += dt
         hostShake *= exp(-6 * dt)
-        let tSync = CACurrentMediaTime()
-        defer { Perf.add("update", CACurrentMediaTime() - tSync) }
+        let tSync = platform.now()
+        defer { Perf.add("update", platform.now() - tSync) }
         if !isAsleep { energy = max(0, energy - dt / (420 * max(0.6, activity))) }
         tickNeeds(dt)
-        let ta = CACurrentMediaTime()
+        let ta = platform.now()
         syncAttachment(dt)
-        Perf.add("sync", CACurrentMediaTime() - ta)
+        Perf.add("sync", platform.now() - ta)
 
         if action == nil { advance() }
         if let a = action {
@@ -160,7 +158,7 @@ final class Cat {
             try? "\(Int(pos.x)) \(Int(pos.y)) \(String(describing: type(of: action ?? Act())))".write(toFile: "/tmp/mochi-pos-\(name).txt", atomically: true, encoding: .utf8)
         }
         // Fully hidden behind other windows: nothing to draw.
-        if panel.occlusionState.contains(.visible) || dragging { view.needsDisplay = true }
+        if sprite.isVisible || dragging { sprite.setNeedsDisplay() }
     }
 
     private func advance() {
@@ -384,25 +382,25 @@ final class Cat {
     }
 
     func applyDepth() {
-        let level: NSWindow.Level
+        let level: SpriteLevel
         switch depth {
-        case .desktop: level = .desktopCat
+        case .desktop: level = .desktop
         case .above: level = .normal
         case .top: level = .carried
         case .inBox, .onBox: level = home.level
         case .atBowls: level = Den.shared.bowls?.level ?? .floating
         }
-        if panel.level != level { panel.level = level }
+        if sprite.level != level { sprite.level = level }
         switch depth {
-        case .desktop, .top: panel.orderFrontRegardless()
-        case .above(let id): panel.order(.above, relativeTo: Int(id))
+        case .desktop, .top: sprite.orderFront()
+        case .above(let id): sprite.order(above: id)
         case .inBox:
             // Tuck in just behind the front wall. (Moving the wall up to the cat instead would leave
             // any cat already in the box standing in front of it.)
-            panel.order(.below, relativeTo: home.front.windowNumber)
-        case .onBox: panel.order(.above, relativeTo: home.front.windowNumber)
+            sprite.order(below: home.front.id)
+        case .onBox: sprite.order(above: home.front.id)
         case .atBowls:
-            if let b = Den.shared.bowls { panel.order(.below, relativeTo: b.panel.windowNumber) }
+            if let b = Den.shared.bowls { sprite.order(below: b.sprite.id) }
         }
         appliedDepth = depth
     }
@@ -411,7 +409,7 @@ final class Cat {
     func verifyStack() {
         guard !paused else { return }
         reanchor()
-        let me = CGWindowID(panel.windowNumber)
+        let me = sprite.id
         let stack = world.stack
         switch depth {
         case .above(let id):
@@ -426,7 +424,7 @@ final class Cat {
             let foreign = between.contains { w in !world.isOwn(w) }
             if mi > hi || foreign { applyDepth() }
         case .inBox:
-            let b = CGWindowID(home.back.windowNumber), f = CGWindowID(home.front.windowNumber)
+            let b = home.back.id, f = home.front.id
             if let mi = stack.firstIndex(of: me), let bi = stack.firstIndex(of: b), let fi = stack.firstIndex(of: f),
                !(fi < mi && mi < bi) { applyDepth() }
         default:
@@ -461,17 +459,17 @@ final class Cat {
     }
 
     private func placeWindow() {
-        let o = CGPoint(x: ((pos.x - view.anchor.x) * 2).rounded() / 2,
-                        y: ((Coords.primaryHeight - pos.y - view.anchor.y) * 2).rounded() / 2)
-        if panel.frame.origin != o {
-            let t0 = CACurrentMediaTime()
-            panel.setFrameOrigin(o)
-            Perf.add("move", CACurrentMediaTime() - t0)
+        let o = CGPoint(x: ((pos.x - anchor.x) * 2).rounded() / 2,
+                        y: ((pos.y + anchor.y) * 2).rounded() / 2 - sprite.size.height)
+        if sprite.origin != o {
+            let t0 = platform.now()
+            sprite.origin = o
+            Perf.add("move", platform.now() - t0)
         }
     }
 
     func show() {
-        panel.orderFrontRegardless()
+        sprite.orderFront()
         applyDepth()
     }
 
@@ -481,14 +479,58 @@ final class Cat {
         depth = depthAfterLanding(on: s)
     }
 
+    // MARK: - Drawing
+
+    /// Cat-local box that holds everything drawn this frame (effects that drift further get clipped).
+    private var localBox: CGRect {
+        let hangs = shownView == .front && pose.fBody.y < 5
+        return hangs ? CGRect(x: -72, y: -112, width: 144, height: 240) : CGRect(x: -72, y: -14, width: 144, height: 142)
+    }
+
+    /// Only the box around the cat is drawn and uploaded, not the whole (mostly empty) window.
+    var drawingBounds: CGRect? {
+        if case .hidden? = overlay { return .zero }
+        let b = localBox
+        return CGRect(x: anchor.x + b.minX * scale, y: anchor.y + b.minY * scale,
+                      width: b.width * scale, height: b.height * scale)
+    }
+
+    func draw(_ ctx: CGContext) {
+        if case .hidden? = overlay { return }
+        let t0 = platform.now()
+        defer { Perf.add("draw", platform.now() - t0) }
+        ctx.saveGState()
+        ctx.translateBy(x: anchor.x, y: anchor.y)
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.saveGState()
+        if depth == .inBox {
+            // Toes and tail stay inside the box instead of poking out under it.
+            let bottom = HomeBox.frontRect.minY - HomeBox.rimLocal.y
+            ctx.clip(to: CGRect(x: -200, y: bottom, width: 400, height: 400))
+        }
+        ctx.scaleBy(x: renderScaleX, y: 1)
+        if case .fight(let other)? = overlay {
+            CatRenderer(coat: coat, time: time).drawFightCloud(ctx, other: other)
+        } else {
+            var p = displayPose
+            p.view = shownView
+            CatRenderer(coat: coat, time: time).draw(ctx, pose: p)
+        }
+        ctx.restoreGState()
+        effects.draw(ctx)
+        ctx.restoreGState()
+    }
+
     // MARK: - Mouse
 
     private func updateMouse() {
         let want = dragging || press != nil || contains(Coords.mouse)
-        if panel.ignoresMouseEvents == want { panel.ignoresMouseEvents = !want }
+        if sprite.clickThrough == want { sprite.clickThrough = !want }
     }
 
     func mouseDown() { press = Coords.mouse }
+
+    func rightMouseDown() { onContextMenu?() }
 
     func mouseDragged() {
         guard let p = press, !dragging else { return }
@@ -526,6 +568,3 @@ final class Cat {
     }
 }
 
-extension World {
-    func isOwn(_ id: CGWindowID) -> Bool { NSApp.window(withWindowNumber: Int(id)) != nil }
-}
