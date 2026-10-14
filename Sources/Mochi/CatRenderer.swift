@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// Draws a cat from a `Pose` into a context already set up in cat-local space
@@ -13,13 +12,6 @@ struct CatRenderer {
 
     func ellipse(_ c: CGPoint, _ w: CGFloat, _ h: CGFloat) -> CGPath {
         CGPath(ellipseIn: CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h), transform: nil)
-    }
-
-    func capsule(_ a: CGPoint, _ b: CGPoint, _ width: CGFloat) -> CGPath {
-        let line = CGMutablePath()
-        line.move(to: a)
-        line.addLine(to: CGPoint(x: b.x + 0.001, y: b.y))
-        return line.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 2)
     }
 
     /// A round-ended limb with an outline, drawn as two stroked lines (much cheaper than outlining a path).

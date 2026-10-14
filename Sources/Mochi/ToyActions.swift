@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 extension Cat {
     /// Where the front paws are while leaping (for catching things), CG coords.

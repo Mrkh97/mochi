@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 enum SocialKind { case boop, groom, wrestle, tag }
 

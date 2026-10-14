@@ -1,23 +1,25 @@
-import AppKit
-import ServiceManagement
+import Foundation
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private var statusItem: NSStatusItem!
-    private var home: HomeBox!
-    private var bowls: Bowls!
-    private var toy: Toy!
+/// The running app, minus the operating system: the cats, their box, bowls and toy, the frame loop,
+/// settings, and what the menu offers. The platform layer drives `tick()` about 60 times a second
+/// and shows `menu(for:)` from the menu bar, the tray, or a right-click on a cat.
+final class Household {
+    private(set) var home: HomeBox!
+    private(set) var bowls: Bowls!
+    private(set) var toy: Toy!
     private(set) var cats: [Cat] = [] { didSet { Den.shared.cats = cats } }
     private var slowClock: CGFloat = 0
     private var saveClock: CGFloat = 0
-    private var alerting = false
-    private var timer: Timer?
-    private var last = CACurrentMediaTime()
+    private(set) var alerting = false
+    private var last = platform.now()
     private var worldClock: CGFloat = 1
     private var lastMouse = CGPoint.zero
     private var mouseSpeed: CGFloat = 0
-    private var activityToken: NSObjectProtocol?
     private let defaults = UserDefaults.standard
     private static let names = ["Mochi", "Tofu", "Biscuit", "Miso", "Pudding", "Noodle", "Dumpling"]
+
+    /// Called when the cats start or stop needing something (empty bowls, a grumpy cat).
+    var onAttentionChanged: ((Bool) -> Void)?
 
     private var scale: CGFloat {
         get { CGFloat(defaults.object(forKey: "scale") as? Double ?? 1.0) }
@@ -35,12 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         get { defaults.stringArray(forKey: "names") ?? [] }
         set { defaults.set(newValue, forKey: "names") }
     }
-    private var paused = false
+    private(set) var paused = false
 
-    func applicationDidFinishLaunching(_ note: Notification) {
-        NSApp.setActivationPolicy(.accessory)
-        // Keep animating smoothly even when another app is in front.
-        activityToken = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep], reason: "Cat on the loose")
+    func start() {
         Nudger.shared.enabled = defaults.object(forKey: "nudge") as? Bool ?? true
 
         World.shared.refreshScreens()
@@ -71,35 +70,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (i, id) in coats.enumerated() { addCat(coat: Coat.named(id), name: i < names.count ? names[i] : nil, index: i, persist: false) }
         catNames = cats.map { $0.name }
         loadNeeds()
-
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = Self.menuIcon()
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
-
-        let nc = NotificationCenter.default
-        nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.screensChanged()
-        }
-        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { _ in
-            World.shared.refresh()
-        }
-
-        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.saveNeeds()
-        }
-
-        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
     }
 
     // MARK: Loop
 
-    private func tick() {
-        let now = CACurrentMediaTime()
-        defer { Perf.add("tick", CACurrentMediaTime() - now) }
+    func tick() {
+        let now = platform.now()
+        defer { Perf.add("tick", platform.now() - now) }
         let dt = CGFloat(min(0.05, now - last))
         last = now
         guard !paused else { return }
@@ -108,10 +85,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let busy = cats.contains { $0.isMoving }
         if worldClock > (busy ? 1.0 / 10 : 1.0 / 4) {
             worldClock = 0
-            let r0 = CACurrentMediaTime()
+            let r0 = platform.now()
             World.shared.refresh()
             cats.forEach { $0.verifyStack() }
-            Perf.add("refresh", CACurrentMediaTime() - r0)
+            Perf.add("refresh", platform.now() - r0)
         }
         let m = Coords.mouse
         let sp = hypot(m.x - lastMouse.x, m.y - lastMouse.y) / max(dt, 0.001)
@@ -137,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         slowClock += dt
         if slowClock > 1 {
             slowClock = 0
-            updateBadge()
+            updateAttention()
             if let s = ProcessInfo.processInfo.environment["MOCHI_REFILL_AFTER"], let after = Double(s),
                cats.first.map({ Double($0.time) > after && Double($0.time) < after + 1.2 }) == true {
                 refillAll()
@@ -161,11 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func addCat(coat: Coat, name: String? = nil, index: Int, persist: Bool = true) {
         let c = Cat(name: name ?? freeName(), coat: coat, scale: scale, home: home)
         c.activity = activity
-        c.view.onContextMenu = { [weak self, weak c] event, view in
+        c.onContextMenu = { [weak self, weak c] in
             guard let self else { return }
-            let menu = NSMenu()
-            self.build(menu, for: c)
-            NSMenu.popUpContextMenu(menu, with: event, for: view)
+            platform.popUpMenu(self.menu(for: c))
         }
         // Everyone starts asleep in the box.
         let rim = home.surface
@@ -187,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         saveNeeds()
     }
 
-    private func screensChanged() {
+    func screensChanged() {
         World.shared.refreshScreens()
         World.shared.refresh()
         if !World.shared.screens.contains(where: { $0.frame.contains(home.rim) }) { home.move(rimTo: defaultRim()) }
@@ -218,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Needs, bowls and the toy
 
-    private func saveNeeds() {
+    func saveNeeds() {
         defaults.set(cats.map { [Double($0.hunger), Double($0.thirst), Double($0.grumpy)] }, forKey: "needs")
         defaults.set(Date().timeIntervalSince1970, forKey: "needsSavedAt")
     }
@@ -238,11 +213,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         bowls.food < 0.03 || bowls.water < 0.03 || cats.contains { $0.grumpy > 0.5 }
     }
 
-    private func updateBadge() {
+    private func updateAttention() {
         let a = needsAttention
         if a != alerting {
             alerting = a
-            statusItem.button?.image = Self.menuIcon(alert: a)
+            onAttentionChanged?(a)
         }
     }
 
@@ -252,12 +227,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(true, forKey: "toyOut")
     }
 
-    @objc private func refillAll() {
+    private func refillAll() {
         bowls.refill(drink: false)
         bowls.refill(drink: true)
     }
 
-    @objc private func toggleToy() {
+    private func toggleToy() {
         if toy.visible {
             toy.hide()
             defaults.set(false, forKey: "toyOut")
@@ -273,115 +248,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Menu
 
-    func menuNeedsUpdate(_ menu: NSMenu) { build(menu, for: nil) }
-
-    private func item(_ title: String, _ action: Selector?, key: String = "", on: Bool = false, tag: Int = 0, rep: Any? = nil) -> NSMenuItem {
-        let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        i.target = self
-        i.state = on ? .on : .off
-        i.tag = tag
-        i.representedObject = rep
-        return i
-    }
-
     /// The menu; right-clicking a cat adds a few things just for that cat at the top.
-    private func build(_ menu: NSMenu, for cat: Cat?) {
-        menu.removeAllItems()
+    func menu(for cat: Cat?) -> [MenuItem] {
+        var items: [MenuItem] = []
         if let cat, cats.count > 1 {
-            menu.addItem(item("Rehome \(cat.name)", #selector(rehomeItem(_:)), rep: cat))
-            menu.addItem(.separator())
+            items.append(.action("Rehome \(cat.name)") { [weak self, weak cat] in
+                if let cat { self?.rehome(cat) }
+            })
+            items.append(.separator)
         }
         for c in cats {
             var text = "\(c.name): \(c.status)"
             if let note = c.needsNote { text += " (\(note))" }
-            let line = NSMenuItem(title: text, action: nil, keyEquivalent: "")
-            line.isEnabled = false
-            menu.addItem(line)
+            items.append(.label(text))
         }
-        let levels = NSMenuItem(title: "Food \(meter(bowls.food))   Water \(meter(bowls.water))", action: nil, keyEquivalent: "")
-        levels.isEnabled = false
-        menu.addItem(levels)
-        menu.addItem(.separator())
-        menu.addItem(item("Refill Food & Water", #selector(refillAll), key: "f"))
-        menu.addItem(item(toy.visible ? "Put the Yarn Ball Away" : "Get the Yarn Ball Out", #selector(toggleToy), key: "y"))
-        menu.addItem(.separator())
-        menu.addItem(item("Call Home", #selector(callHome), key: "h"))
-        menu.addItem(item("Nap Time", #selector(napTime)))
-        menu.addItem(item("Wake Up!", #selector(wakeUp)))
-        menu.addItem(.separator())
+        items.append(.label("Food \(meter(bowls.food))   Water \(meter(bowls.water))"))
+        items.append(.separator)
+        items.append(.action("Refill Food & Water", key: "f") { [weak self] in self?.refillAll() })
+        items.append(.action(toy.visible ? "Put the Yarn Ball Away" : "Get the Yarn Ball Out", key: "y") { [weak self] in self?.toggleToy() })
+        items.append(.separator)
+        items.append(.action("Call Home", key: "h") { [weak self] in self?.callHome() })
+        items.append(.action("Nap Time") { [weak self] in self?.napTime() })
+        items.append(.action("Wake Up!") { [weak self] in self?.wakeUp() })
+        items.append(.separator)
 
-        let coatMenu = NSMenu()
+        func coatItems(_ i: Int) -> [MenuItem] {
+            Coat.all.map { coat in
+                .action(coat.name, checked: cats[i].coat.id == coat.id) { [weak self] in self?.setCoat(i, coat.id) }
+            }
+        }
         if cats.count == 1 {
-            for coat in Coat.all {
-                coatMenu.addItem(item(coat.name, #selector(setCoat(_:)), on: cats[0].coat.id == coat.id, rep: "0|\(coat.id)"))
-            }
+            items.append(.submenu("Coat", coatItems(0)))
         } else {
-            for (i, c) in cats.enumerated() {
-                let sub = NSMenu()
-                for coat in Coat.all { sub.addItem(item(coat.name, #selector(setCoat(_:)), on: c.coat.id == coat.id, rep: "\(i)|\(coat.id)")) }
-                let ci = NSMenuItem(title: c.name, action: nil, keyEquivalent: "")
-                ci.submenu = sub
-                coatMenu.addItem(ci)
+            items.append(.submenu("Coat", cats.indices.map { .submenu(cats[$0].name, coatItems($0)) }))
+        }
+
+        items.append(.submenu("Size", [("Small", 0.75), ("Medium", 1.0), ("Large", 1.3), ("Chonky", 1.6)].map { name, v in
+            .action(name, checked: abs(scale - v) < 0.01) { [weak self] in self?.setSize(v) }
+        }))
+        items.append(.submenu("Energy", [("Sleepy", 0.6), ("Normal", 1.0), ("Playful", 1.5)].map { name, v in
+            .action(name, checked: abs(activity - v) < 0.01) { [weak self] in self?.setActivity(v) }
+        }))
+
+        let canAdopt = cats.count < 6
+        items.append(.submenu("Adopt Another Cat", enabled: canAdopt, !canAdopt ? [] : Coat.all.map { coat in
+            .action(coat.name) { [weak self] in self?.adopt(coat.id) }
+        }))
+        let canRehome = cats.count > 1
+        items.append(.submenu("Rehome a Cat", enabled: canRehome, !canRehome ? [] : cats.map { c in
+            .action("\(c.name) (\(c.coat.name))") { [weak self, weak c] in
+                if let c { self?.rehome(c) }
             }
-        }
-        let coatItem = NSMenuItem(title: "Coat", action: nil, keyEquivalent: "")
-        coatItem.submenu = coatMenu
-        menu.addItem(coatItem)
+        }))
+        items.append(.separator)
 
-        let sizeMenu = NSMenu()
-        for (name, v) in [("Small", 0.75), ("Medium", 1.0), ("Large", 1.3), ("Chonky", 1.6)] {
-            sizeMenu.addItem(item(name, #selector(setSize(_:)), on: abs(scale - v) < 0.01, rep: v))
-        }
-        let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
-        sizeItem.submenu = sizeMenu
-        menu.addItem(sizeItem)
-
-        let actMenu = NSMenu()
-        for (name, v) in [("Sleepy", 0.6), ("Normal", 1.0), ("Playful", 1.5)] {
-            actMenu.addItem(item(name, #selector(setActivity(_:)), on: abs(activity - v) < 0.01, rep: v))
-        }
-        let actItem = NSMenuItem(title: "Energy", action: nil, keyEquivalent: "")
-        actItem.submenu = actMenu
-        menu.addItem(actItem)
-
-        let addMenu = NSMenu()
-        for coat in Coat.all { addMenu.addItem(item(coat.name, #selector(addCatItem(_:)), rep: coat.id)) }
-        let addItem = NSMenuItem(title: "Adopt Another Cat", action: cats.count < 6 ? #selector(noop) : nil, keyEquivalent: "")
-        addItem.target = self
-        addItem.submenu = cats.count < 6 ? addMenu : nil
-        menu.addItem(addItem)
-        let rehomeMenu = NSMenu()
-        for c in cats { rehomeMenu.addItem(item("\(c.name) (\(c.coat.name))", #selector(rehomeItem(_:)), rep: c)) }
-        let rehome = NSMenuItem(title: "Rehome a Cat", action: cats.count > 1 ? #selector(noop) : nil, keyEquivalent: "")
-        rehome.target = self
-        rehome.submenu = cats.count > 1 ? rehomeMenu : nil
-        menu.addItem(rehome)
-        menu.addItem(.separator())
-
-        menu.addItem(item("Box Stays Above Windows", #selector(toggleBoxFloating), on: home.floating))
-        menu.addItem(item("Move Box to Pointer", #selector(moveBoxToPointer)))
+        items.append(.action("Box Stays Above Windows", checked: home.floating) { [weak self] in self?.toggleBoxFloating() })
+        items.append(.action("Move Box to Pointer") { [weak self] in self?.moveBoxToPointer() })
         let nudgeTitle = Nudger.shared.trusted ? "Slips Wobble Real Windows" : "Slips Wobble Real Windows (needs Accessibility)…"
-        menu.addItem(item(nudgeTitle, #selector(toggleNudge), on: Nudger.shared.active))
-        menu.addItem(item("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
-        menu.addItem(.separator())
-        menu.addItem(item(paused ? "Resume" : "Hide Cats", #selector(togglePause), key: "p"))
-        menu.addItem(item("Quit Mochi", #selector(quit), key: "q"))
+        items.append(.action(nudgeTitle, checked: Nudger.shared.active) { [weak self] in self?.toggleNudge() })
+        items.append(.action("Open at Login", checked: platform.opensAtLogin) { Self.toggleLogin() })
+        items.append(.separator)
+        items.append(.action(paused ? "Resume" : "Hide Cats", key: "p") { [weak self] in self?.togglePause() })
+        items.append(.action("Quit Mochi", key: "q") { platform.quit() })
+        return items
     }
 
-    @objc private func noop() {}
-
-    @objc private func callHome() {
+    private func callHome() {
         for c in cats where c.surface != .box {
             c.ask(.home)
             c.spawn(.exclaim, dx: 12, dy: 18, v: CGPoint(x: 0, y: 20), life: 0.6)
         }
     }
 
-    @objc private func napTime() {
+    private func napTime() {
         for c in cats where !c.isAsleep { c.ask(.nap) }
     }
 
-    @objc private func wakeUp() {
+    private func wakeUp() {
         for c in cats {
             c.energy = max(c.energy, 0.9)
             if c.isAsleep {
@@ -391,16 +334,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func setCoat(_ sender: NSMenuItem) {
-        guard let rep = sender.representedObject as? String else { return }
-        let parts = rep.split(separator: "|")
-        guard parts.count == 2, let i = Int(parts[0]), i < cats.count else { return }
-        cats[i].coat = Coat.named(String(parts[1]))
+    private func setCoat(_ i: Int, _ id: String) {
+        guard i < cats.count else { return }
+        cats[i].coat = Coat.named(id)
         saveCats()
     }
 
-    @objc private func setSize(_ sender: NSMenuItem) {
-        guard let v = sender.representedObject as? Double else { return }
+    private func setSize(_ v: Double) {
         scale = CGFloat(v)
         home.setScale(scale)
         bowls.setScale(scale)
@@ -411,21 +351,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func setActivity(_ sender: NSMenuItem) {
-        guard let v = sender.representedObject as? Double else { return }
+    private func setActivity(_ v: Double) {
         activity = CGFloat(v)
         cats.forEach { $0.activity = activity }
     }
 
-    @objc private func addCatItem(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String, cats.count < 6 else { return }
-        addCat(coat: Coat.named(id), index: cats.count)
+    private func adopt(_ coatID: String) {
+        guard cats.count < 6 else { return }
+        addCat(coat: Coat.named(coatID), index: cats.count)
         cats.last?.queue = [Sleep(1.5)]
-    }
-
-    @objc private func rehomeItem(_ sender: NSMenuItem) {
-        guard let c = sender.representedObject as? Cat else { return }
-        rehome(c)
     }
 
     /// Say goodbye to one cat. The others carry on; anyone playing with it simply finds it gone.
@@ -439,15 +373,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         c.overlay = nil
         if toy.holder === c { toy.release(v: CGPoint(x: 0, y: -150)) }
         saveCats()
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.5
-            c.panel.animator().alphaValue = 0
-        }, completionHandler: {
-            c.panel.orderOut(nil)
-        })
+        c.sprite.fadeOut()
     }
 
-    @objc private func toggleBoxFloating() {
+    private func toggleBoxFloating() {
         home.floating.toggle()
         bowls.floating = home.floating
         defaults.set(home.floating, forKey: "boxFloating")
@@ -455,12 +384,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         cats.filter { $0.depth == .inBox || $0.depth == .onBox }.forEach { $0.applyDepth() }
     }
 
-    @objc private func moveBoxToPointer() {
+    private func moveBoxToPointer() {
         home.move(rimTo: Coords.mouse)
         for c in cats where c.surface == .box { c.stand(on: home.surface, x: (home.surface.minX + home.surface.maxX) / 2) }
     }
 
-    @objc private func toggleNudge() {
+    private func toggleNudge() {
         if !Nudger.shared.trusted {
             Nudger.shared.enabled = true
             Nudger.shared.requestPermission()
@@ -470,62 +399,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         defaults.set(Nudger.shared.enabled, forKey: "nudge")
     }
 
-    @objc private func toggleLogin() {
-        let svc = SMAppService.mainApp
+    private static func toggleLogin() {
         do {
-            if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
+            try platform.setOpensAtLogin(!platform.opensAtLogin)
         } catch {
-            let a = NSAlert()
-            a.messageText = "Couldn't change the login item"
-            a.informativeText = error.localizedDescription
-            a.runModal()
+            platform.showAlert("Couldn't change the login item", error.localizedDescription)
         }
     }
 
-    @objc private func togglePause() {
+    private func togglePause() {
         paused.toggle()
         for c in cats {
             c.paused = paused
-            if paused { c.panel.orderOut(nil) } else { c.show() }
+            if paused { c.sprite.orderOut() } else { c.show() }
         }
         if paused {
             home.hide()
             bowls.hide()
-            toy.panel.orderOut(nil)
+            toy.sprite.orderOut()
         } else {
             home.show()
             bowls.show()
-            if toy.visible { toy.panel.orderFrontRegardless() }
+            if toy.visible { toy.sprite.orderFront() }
             cats.forEach { $0.applyDepth() }
         }
     }
+}
 
-    @objc private func quit() { NSApp.terminate(nil) }
+/// Physically wobbles other apps' windows (the cat's weight yanking on them), when allowed.
+final class Nudger {
+    static let shared = Nudger()
+    var enabled = true
+    var trusted: Bool { platform.canMoveWindows }
+    var active: Bool { enabled && trusted }
 
-    // MARK: Icon
+    func requestPermission() { platform.requestWindowAccess() }
 
-    static func menuIcon(alert: Bool = false) -> NSImage {
-        let img = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
-            ctx.setFillColor((alert ? NSColor.labelColor : NSColor.black).cgColor)
-            let head = CGMutablePath()
-            head.addEllipse(in: CGRect(x: 2, y: 2, width: 14, height: 11.5))
-            head.move(to: CGPoint(x: 2.6, y: 9)); head.addLine(to: CGPoint(x: 3.6, y: 16.5)); head.addLine(to: CGPoint(x: 8, y: 12)); head.closeSubpath()
-            head.move(to: CGPoint(x: 15.4, y: 9)); head.addLine(to: CGPoint(x: 14.4, y: 16.5)); head.addLine(to: CGPoint(x: 10, y: 12)); head.closeSubpath()
-            ctx.addPath(head)
-            ctx.fillPath()
-            ctx.setBlendMode(.clear)
-            ctx.fillEllipse(in: CGRect(x: 5.4, y: 6.4, width: 2.2, height: 2.8))
-            ctx.fillEllipse(in: CGRect(x: 10.4, y: 6.4, width: 2.2, height: 2.8))
-            if alert {
-                // A red dot: the cats need something.
-                ctx.setBlendMode(.normal)
-                ctx.setFillColor(NSColor.systemRed.cgColor)
-                ctx.fillEllipse(in: CGRect(x: 12.5, y: 11.5, width: 6, height: 6))
-            }
-            return true
+    func jiggle(_ win: WinInfo, amplitude: CGFloat) {
+        guard active else { return }
+        platform.jiggle(win, amplitude: amplitude)
+    }
+}
+
+/// Debug timing (MOCHI_DEBUG): prints average cost per call every few seconds.
+enum Perf {
+    static var sums: [String: (Double, Int)] = [:]
+    static var lastPrint = 0.0
+    static func add(_ key: String, _ dt: Double) {
+        guard Cat.debug else { return }
+        let v = sums[key] ?? (0, 0)
+        sums[key] = (v.0 + dt, v.1 + 1)
+        let now = platform.now()
+        if lastPrint == 0 { lastPrint = now }
+        if now - lastPrint > 5 {
+            let span = now - lastPrint
+            let line = sums.map { "\($0.key) " + String(format: "%.3fms x%.0f/s", $0.value.0 / Double($0.value.1) * 1000, Double($0.value.1) / span) }.sorted().joined(separator: "  ")
+            print("perf:", line)
+            sums = [:]
+            lastPrint = now
         }
-        img.isTemplate = !alert
-        return img
     }
 }

@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 /// The cat's home: a cardboard box you can drag anywhere. It's made of two windows
 /// (back wall and front wall) so a cat can sit *inside* it, sandwiched between them.
@@ -7,8 +7,8 @@ final class HomeBox {
     static let rimLocal = CGPoint(x: 65, y: 64)        // top edge of the front wall, view coords (y up)
     static let frontRect = CGRect(x: 17, y: 10, width: 96, height: 54)
 
-    let back: CatPanel
-    let front: CatPanel
+    let back: Sprite
+    let front: Sprite
     private let backView: BoxView
     private let frontView: BoxView
     private(set) var scale: CGFloat
@@ -21,14 +21,13 @@ final class HomeBox {
         self.scale = scale
         self.originCG = originCG
         let size = CGSize(width: HomeBox.viewSize.width * scale, height: HomeBox.viewSize.height * scale)
-        back = CatPanel(size: size)
-        front = CatPanel(size: size)
+        back = platform.makeSprite(size: size)
+        front = platform.makeSprite(size: size)
         backView = BoxView(part: .back)
         frontView = BoxView(part: .front)
         for (p, v) in [(back, backView), (front, frontView)] {
-            v.frame = NSRect(origin: .zero, size: size)
             v.box = self
-            p.contentView = v
+            p.content = v
         }
         applyLevel()
         place()
@@ -38,7 +37,7 @@ final class HomeBox {
         CGRect(origin: originCG, size: CGSize(width: HomeBox.viewSize.width * scale, height: HomeBox.viewSize.height * scale))
     }
 
-    var level: NSWindow.Level { floating ? .floating : .desktopCat }
+    var level: SpriteLevel { floating ? .floating : .desktop }
 
     /// The point on the rim where a cat in the box rests its paws.
     var rim: CGPoint {
@@ -61,7 +60,7 @@ final class HomeBox {
         let bottomCenter = CGPoint(x: frameCG.midX, y: frameCG.maxY)
         scale = s
         let size = CGSize(width: HomeBox.viewSize.width * s, height: HomeBox.viewSize.height * s)
-        for p in [back, front] { p.setContentSize(size); p.contentView?.frame = NSRect(origin: .zero, size: size) }
+        for p in [back, front] { p.size = size }
         originCG = CGPoint(x: bottomCenter.x - size.width / 2, y: bottomCenter.y - size.height)
         place()
     }
@@ -73,26 +72,25 @@ final class HomeBox {
     }
 
     func place() {
-        let r = Coords.cocoa(fromCG: frameCG)
-        back.setFrameOrigin(r.origin)
-        front.setFrameOrigin(r.origin)
+        back.origin = originCG
+        front.origin = originCG
         World.shared.boxSurface = surface
         World.shared.boxFloating = floating
-        backView.needsDisplay = true
-        frontView.needsDisplay = true
+        back.setNeedsDisplay()
+        front.setNeedsDisplay()
     }
 
     func show() {
-        back.orderFrontRegardless()
-        front.order(.above, relativeTo: back.windowNumber)
+        back.orderFront()
+        front.order(above: back.id)
     }
 
-    func hide() { back.orderOut(nil); front.orderOut(nil) }
+    func hide() { back.orderOut(); front.orderOut() }
 
     private func applyLevel() {
         back.level = level
         front.level = level
-        if back.isVisible { show() }
+        if back.isShown { show() }
         World.shared.boxFloating = floating
         World.shared.boxSurface = surface
     }
@@ -100,7 +98,7 @@ final class HomeBox {
     /// Called every frame: only the front wall catches the mouse.
     func updateMouse(_ m: CGPoint) {
         let over = hitRect.contains(m) || dragOffset != nil
-        if front.ignoresMouseEvents == over { front.ignoresMouseEvents = !over }
+        if front.clickThrough == over { front.clickThrough = !over }
     }
 
     // Dragging the box around.
@@ -122,31 +120,27 @@ final class HomeBox {
     }
 }
 
-final class BoxView: NSView {
+/// One wall of the box.
+final class BoxView: SpriteContent {
     enum Part { case back, front }
     let part: Part
     weak var box: HomeBox?
 
     init(part: Part) {
         self.part = part
-        super.init(frame: .zero)
     }
-    required init?(coder: NSCoder) { fatalError() }
 
-    override var isFlipped: Bool { false }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { box?.mouseDown() }
-    override func mouseDragged(with event: NSEvent) { box?.mouseDragged() }
-    override func mouseUp(with event: NSEvent) { box?.mouseUp() }
+    func mouseDown() { box?.mouseDown() }
+    func mouseDragged() { box?.mouseDragged() }
+    func mouseUp() { box?.mouseUp() }
 
     static let card = rgb(0xDDA468)
     static let cardDark = rgb(0xB77B45)
     static let cardInside = rgb(0x9C6537)
     static let line = rgb(0x6E4423)
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext, let box else { return }
-        ctx.clear(bounds)
+    func draw(_ ctx: CGContext) {
+        guard let box else { return }
         ctx.scaleBy(x: box.scale, y: box.scale)
         Self.paint(ctx, part)
     }

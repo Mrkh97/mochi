@@ -6,15 +6,13 @@ private func _AXUIElementGetWindow(_ element: AXUIElement, _ id: UnsafeMutablePo
 
 /// Physically wobbles other apps' windows (the cat's weight yanking on them).
 /// Needs the Accessibility permission; without it, nothing moves and the cat just bounces.
-final class Nudger {
-    static let shared = Nudger()
+final class MacNudger {
+    static let shared = MacNudger()
     private let queue = DispatchQueue(label: "mochi.nudge", qos: .userInteractive)
     private var busy = Set<CGWindowID>()
     private let lock = NSLock()
 
-    var enabled = true
     var trusted: Bool { AXIsProcessTrusted() }
-    var active: Bool { enabled && trusted }
 
     func requestPermission() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -23,7 +21,7 @@ final class Nudger {
 
     /// Damped spring: pulled down by `amplitude` points, then bobbing back into place.
     func jiggle(_ win: WinInfo, amplitude: CGFloat, duration: Double = 0.75) {
-        guard active else { return }
+        guard trusted else { return }
         lock.lock()
         if busy.contains(win.id) { lock.unlock(); return }
         busy.insert(win.id)

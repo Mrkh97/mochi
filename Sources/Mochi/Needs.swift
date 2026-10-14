@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 // MARK: - Hunger, thirst and mood
 

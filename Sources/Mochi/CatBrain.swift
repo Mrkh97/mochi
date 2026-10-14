@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 func chance(_ p: CGFloat) -> Bool { CGFloat.random(in: 0...1) < p }
 

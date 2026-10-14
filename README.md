@@ -2,15 +2,15 @@
 
 <h1 align="center">Mochi</h1>
 
-<p align="center">A cat that lives on your Mac desktop. She walks on your windows, hides behind them, naps on them,<br>slips off their edges, and expects to be fed.</p>
+<p align="center">A cat that lives on your desktop. She walks on your windows, hides behind them, naps on them,<br>slips off their edges, and expects to be fed.</p>
 
-<p align="center"><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi.zip"><b>Download for macOS</b></a> · macOS 14 Sonoma or later · Apple silicon and Intel</p>
+<p align="center"><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi.zip"><b>Download for macOS</b></a> · macOS 14 Sonoma or later · Apple silicon and Intel<br><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi-Setup.exe"><b>Download for Windows</b></a> · Windows 10 and 11 · Intel/AMD and ARM</p>
 
 ![Seven cats on a desktop: one strolls along a window, one dangles from a window's edge, one is petted, one peeks over a window from behind, one plays with a yarn ball, one eats, and one sleeps in a cardboard box](docs/demo.gif)
 
-Mochi lives in a cardboard box you can put anywhere on screen. She wakes up, hops out and treats your real windows as furniture. She has no Dock icon and never steals focus from the app you're using.
+Mochi lives in a cardboard box you can put anywhere on screen. She wakes up, hops out and treats your real windows as furniture. She has no Dock or taskbar button and never steals focus from the app you're using.
 
-## Install
+## Install on macOS
 
 ### Download
 
@@ -53,6 +53,64 @@ Everything else works without it; the windows just stay put. If you rebuild or u
 ### Uninstall
 
 Quit Mochi from its menu and drag Mochi.app to the Trash. To also forget its settings: `defaults delete dev.mochi.desktopcat`.
+
+## Install on Windows
+
+Mochi runs on Windows 10 and 11, on Intel/AMD (x64) and ARM PCs. One installer covers both; it picks the right build for your PC.
+
+### Download
+
+1. Download [**Mochi-Setup.exe**](https://github.com/Mrkh97/mochi/releases/latest/download/Mochi-Setup.exe) from the [latest release](https://github.com/Mrkh97/mochi/releases/latest) and open it.
+2. Mochi isn't signed with a paid certificate, so Windows may say **Windows protected your PC**. Click **More info**, then **Run anyway**. (Your browser may also ask whether to keep the download.)
+3. Click **Next**, then **Finish**. It installs just for you, so it doesn't ask for administrator rights. Leave **Start Mochi when I sign in** ticked to have her start with Windows (you can change this later with **Open at Login** in her menu).
+4. Look for the cat face in the notification area at the right end of the taskbar. That's where all the settings are. Windows hides new icons under the **^** at first; drag it onto the taskbar to keep it in view.
+
+To update, download and run the newest installer; it closes Mochi, keeps your cats and starts her again.
+
+Everything works as on the Mac, with two differences:
+
+- **Slips Wobble Real Windows** needs no permission on Windows. It can't move windows of apps running as administrator.
+- Mochi sizes everything for your main display's scaling. On a second display with different scaling, cats look a little bigger or smaller there.
+
+### Build from source
+
+1. Install the tools. In PowerShell:
+
+   ```powershell
+   winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --override "--passive --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100"
+   winget install --id Swift.Toolchain --exact
+   winget install --id Git.Git --exact
+   ```
+
+   These are the Visual C++ build tools with a Windows SDK, the [Swift toolchain](https://www.swift.org/install/windows/) and Git.
+
+2. Open a new PowerShell window (so it finds `swift` and `git`) and run:
+
+   ```powershell
+   git clone https://github.com/Mrkh97/mochi.git
+   cd mochi
+   powershell -ExecutionPolicy Bypass -File .\build.ps1 -Install
+   ```
+
+   This builds Mochi for your PC, copies it to `%LOCALAPPDATA%\Programs\Mochi` and starts it. Windows doesn't run downloaded scripts by default; `-ExecutionPolicy Bypass` allows just this one.
+
+`build.ps1` puts its result in `build\Mochi-<arch>`: `Mochi.exe` plus the Swift and Visual C++ runtime DLLs it needs, so that folder runs on any PC of the same kind without installing anything. Its options (start each line with `powershell -ExecutionPolicy Bypass -File` as above if Windows won't run it):
+
+```powershell
+.\build.ps1                  # just build, for this PC
+.\build.ps1 -Arch x64        # build for Intel/AMD PCs (works from an ARM PC too)
+.\build.ps1 -Arch arm64      # build for ARM PCs (works from an Intel/AMD PC too)
+.\build.ps1 -Release         # also zip it as build\Mochi-windows-<arch>.zip
+.\build.ps1 -Installer       # build for both and make build\Mochi-Setup.exe
+```
+
+`-Installer` needs [Inno Setup](https://jrsoftware.org/isinfo.php) (`winget install --id JRSoftware.InnoSetup --exact`); the installer script is `windows\Mochi.iss`.
+
+### Uninstall
+
+Open **Settings → Apps → Installed apps**, find **Mochi** and choose **Uninstall**. That also removes its settings.
+
+If you installed with `build.ps1 -Install` instead, turn off **Open at Login**, quit Mochi from its menu, and delete `%LOCALAPPDATA%\Programs\Mochi`. To also forget its settings, delete `%LOCALAPPDATA%\Mochi.exe.plist`.
 
 ## What she does
 
@@ -110,11 +168,11 @@ There are also four sizes and three energy levels.
 
 ## The menu
 
-Click the cat face in the menu bar, or right-click a cat, to see how each cat is doing and how full the bowls are. From there you can:
+Click the cat face in the menu bar (on Windows, in the notification area), or right-click a cat, to see how each cat is doing and how full the bowls are. From there you can:
 
 | | |
 |---|---|
-| **Refill Food & Water** | Top up both bowls (⌘F) |
+| **Refill Food & Water** | Top up both bowls (⌘F on a Mac) |
 | **Get the Yarn Ball Out / Put It Away** | Show or hide the toy |
 | **Call Home / Nap Time / Wake Up!** | Send everyone to the box, to sleep, or out to play |
 | **Coat, Size, Energy** | Per-cat coat; size and activity for everyone |
@@ -122,22 +180,25 @@ Click the cat face in the menu bar, or right-click a cat, to see how each cat is
 | **Rehome a Cat** | Pick which one goes. Right-clicking a cat also offers *Rehome* for just that cat |
 | **Box Stays Above Windows** | Keep the box and bowls on top, or down on the desktop |
 | **Move Box to Pointer** | Or just drag the box. It stays where you put it |
-| **Slips Wobble Real Windows** | See [the permission above](#optional-let-the-windows-wobble) |
+| **Slips Wobble Real Windows** | See [the permission above](#optional-let-the-windows-wobble) (none needed on Windows) |
 | **Open at Login, Hide Cats, Quit** | |
 
 ## How it works
 
-Mochi is a single Swift/AppKit app with no dependencies. Every cat, the box, the bowls and the yarn ball are small transparent windows. The cats are drawn with vector shapes from a pose that is blended every frame, so every movement is smooth.
+Mochi is one Swift app with no dependencies. Every cat, the box, the bowls and the yarn ball are small transparent windows. The cats are drawn with vector shapes from a pose that is blended every frame, so every movement is smooth.
+
+Almost all of it is shared between macOS and Windows and lives in `Sources/Mochi`. It reaches the operating system only through the `Platform` protocol (`Platform.swift`): the window list, screens, the pointer, transparent windows to draw in, text and menus. `Sources/Mochi/Mac` implements that with AppKit; `Sources/Mochi/Windows` with Win32 layered windows, Direct2D and DirectWrite (through the small C++ shim in `Sources/CDirect2D`), plus a stand-in for the part of CoreGraphics the drawing code uses, so the cats are drawn by exactly the same code on both.
 
 | Piece | File |
 |---|---|
+| The running app: cats, box, bowls, toy, frame loop, settings, the menu | `Household.swift` |
 | Window list, screens, surfaces a cat can stand on, who covers what | `World.swift` |
-| Placing a cat's window *between* other apps' windows (`order(.above, relativeTo:)` with their window numbers) | `Cat.swift` (`applyDepth`, `verifyStack`, `reanchor`) |
+| Placing a cat's window *between* other apps' windows (ordered relative to their window numbers or handles) | `Cat.swift` (`applyDepth`, `verifyStack`, `reanchor`) |
 | Deciding what to do and planning jumps, climbs, hops and naps | `CatBrain.swift` |
 | Activities: idle, walk, groom, sleep, pet, box | `Actions.swift` |
 | Motion: jump, fall, climb, slip, carried | `Actions+Motion.swift` |
 | The cat herself: vector drawing from a blendable pose | `Pose.swift`, `CatRenderer*.swift`, `Coat.swift` |
-| Wobbling real windows through the Accessibility API | `Nudger.swift` |
+| Wobbling real windows (the Accessibility API on macOS) | `Mac/MacNudger.swift`, `Windows/WinPlatform.swift` |
 | The cardboard box (two windows, so a cat can sit *inside* it) | `HomeBox.swift` |
 | Food & water, hunger, thirst and grumpiness | `Bowls.swift`, `Needs.swift` |
 | The yarn ball (physics) and chasing, pouncing and playing with it | `Toy.swift`, `ToyActions.swift` |
@@ -162,6 +223,8 @@ MOCHI_TRAVEL=1                                  # cats hop between displays cons
 ```
 
 Running the bare binary (`.build/release/Mochi`) keeps its settings separate from the installed app, so you can test without disturbing your own cats.
+
+On Windows, `Mochi.exe --sheet` and `--bench` work the same, and with `MOCHI_DEBUG` set the log goes to `%TEMP%\mochi-debug.log` (a windowed app has no console).
 
 ## Similar projects
 

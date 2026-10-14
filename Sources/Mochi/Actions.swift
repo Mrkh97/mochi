@@ -1,4 +1,4 @@
-import AppKit
+import Foundation
 
 /// One thing a cat does. `step` returns false when finished.
 class Act {

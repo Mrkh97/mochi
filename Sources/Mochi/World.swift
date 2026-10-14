@@ -1,19 +1,10 @@
-import AppKit
+import Foundation
 
-/// Global coordinates in this app are CoreGraphics "global display" coordinates:
-/// origin at the top-left of the primary display, y grows downward. That is what the
-/// window server and the Accessibility API use, so window rectangles need no conversion.
+/// Global coordinates in this app have their origin at the top-left of the primary display and
+/// y growing downward. That is what the macOS window server and Accessibility API use, and what
+/// Windows uses for its virtual screen, so window rectangles need no conversion.
 enum Coords {
-    /// Cached: NSScreen.screens builds a fresh array on every call, which adds up at 60 fps.
-    static var primaryHeight: CGFloat = NSScreen.screens.first?.frame.height ?? 0
-    static func cg(fromCocoa r: NSRect) -> CGRect {
-        CGRect(x: r.minX, y: primaryHeight - r.maxY, width: r.width, height: r.height)
-    }
-    static func cocoa(fromCG r: CGRect) -> NSRect {
-        NSRect(x: r.minX, y: primaryHeight - r.maxY, width: r.width, height: r.height)
-    }
-    static func cg(fromCocoa p: NSPoint) -> CGPoint { CGPoint(x: p.x, y: primaryHeight - p.y) }
-    static var mouse: CGPoint { cg(fromCocoa: NSEvent.mouseLocation) }
+    static var mouse: CGPoint { platform.mouse }
 }
 
 struct ScreenInfo {
@@ -24,7 +15,7 @@ struct ScreenInfo {
 
 struct WinInfo {
     let id: CGWindowID
-    let pid: pid_t
+    let pid: Int32
     var frame: CGRect
     var z: Int            // larger = closer to the viewer
 }
@@ -57,63 +48,35 @@ enum Depth: Equatable {
     case atBowls                 // just behind the bowls, face in the food
 }
 
-/// Window-info keys as NSStrings, made once.
-private enum K {
-    static let layer = kCGWindowLayer as NSString
-    static let number = kCGWindowNumber as NSString
-    static let pid = kCGWindowOwnerPID as NSString
-    static let bounds = kCGWindowBounds as NSString
-    static let alpha = kCGWindowAlpha as NSString
-    static let onscreen = kCGWindowIsOnscreen as NSString
-    static let owner = kCGWindowOwnerName as NSString
-}
-
 final class World {
     static let shared = World()
 
     private(set) var windows: [WinInfo] = []          // real app windows, front to back
-    private(set) var stack: [CGWindowID] = []         // every layer-0 window plus all of ours, front to back
+    private(set) var stack: [CGWindowID] = []         // every ordinary window plus all of ours, front to back
     private(set) var screens: [ScreenInfo] = []
     private var byID: [CGWindowID: Int] = [:]
     private(set) var prevZ: [CGWindowID: Int] = [:]       // stacking from the previous refresh
-    private let ownPID = getpid()
-    var boxSurface: Surface?                          // published by the home box
+    var boxSurface: Surface?                         // published by the home box
     var bowlsSurface: Surface?                        // published by the food & water bowls
     var boxFloating = true
 
     static let topZ = 1_000_000.0
 
     func refreshScreens() {
-        Coords.primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-        screens = NSScreen.screens.map { ScreenInfo(frame: Coords.cg(fromCocoa: $0.frame), visible: Coords.cg(fromCocoa: $0.visibleFrame)) }
+        screens = platform.screens()
     }
 
     func refresh() {
         if screens.isEmpty { refreshScreens() }
-        // Read the CF objects directly; bridging the whole list into Swift dictionaries is several times slower.
-        lastRefresh = CACurrentMediaTime()
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as NSArray? else { return }
-        var result: [WinInfo] = []
-        var order: [CGWindowID] = []
-        for case let w as NSDictionary in list {
-            guard let id = (w[K.number] as? NSNumber)?.uint32Value,
-                  let pid = (w[K.pid] as? NSNumber)?.int32Value else { continue }
-            // Our own windows at every level (the box and bowls float), so a cat in the box can be checked too.
-            if pid == ownPID { order.append(id); continue }
-            guard (w[K.layer] as? NSNumber)?.intValue == 0,
-                  let bd = w[K.bounds] as? NSDictionary,
-                  let frame = CGRect(dictionaryRepresentation: bd) else { continue }
-            order.append(id)
-            if (w[K.owner] as? String) == "Mochi" { continue }   // another copy's cats
-            if ((w[K.alpha] as? NSNumber)?.doubleValue ?? 1) < 0.05 { continue }
-            if frame.width < 140 || frame.height < 130 { continue }
-            if isOverlay(frame) { continue }
-            result.append(WinInfo(id: id, pid: pid, frame: frame, z: 0))
+        lastRefresh = platform.now()
+        let list = platform.windowList()
+        var result = list.windows.filter { w in
+            !(w.frame.width < 140 || w.frame.height < 130) && !isOverlay(w.frame)
         }
         for i in result.indices { result[i].z = result.count - i }
         prevZ = Dictionary(uniqueKeysWithValues: windows.map { ($0.id, $0.z) })
         windows = result
-        stack = order
+        stack = list.stack
         byID = Dictionary(uniqueKeysWithValues: result.enumerated().map { ($1.id, $0) })
     }
 
@@ -129,26 +92,23 @@ final class World {
         return false
     }
 
-    private(set) var lastRefresh: CFTimeInterval = 0
+    private(set) var lastRefresh: Double = 0
 
     /// The window list is surprisingly expensive (~3 ms), so it's only re-read when it matters.
-    func refreshIfStale(_ maxAge: CFTimeInterval = 0.05) {
-        if CACurrentMediaTime() - lastRefresh > maxAge { refresh() }
+    func refreshIfStale(_ maxAge: Double = 0.05) {
+        if platform.now() - lastRefresh > maxAge { refresh() }
     }
 
     func window(_ id: CGWindowID) -> WinInfo? { byID[id].map { windows[$0] } }
 
     /// Cheap single-window lookup for following a moving window every frame.
     func liveFrame(_ id: CGWindowID) -> CGRect? {
-        var ids: [UnsafeRawPointer?] = [UnsafeRawPointer(bitPattern: UInt(id))]
-        guard let arr = CFArrayCreate(kCFAllocatorDefault, &ids, 1, nil),
-              let info = (CGWindowListCreateDescriptionFromArray(arr) as NSArray?)?.firstObject as? NSDictionary,
-              (info[K.onscreen] as? NSNumber)?.boolValue ?? true,
-              let bd = info[K.bounds] as? NSDictionary,
-              let f = CGRect(dictionaryRepresentation: bd) else { return nil }
+        guard let f = platform.liveFrame(of: id) else { return nil }
         if let i = byID[id] { windows[i].frame = f }
         return f
     }
+
+    func isOwn(_ id: CGWindowID) -> Bool { platform.isOwn(id) }
 
     // MARK: Screens
 

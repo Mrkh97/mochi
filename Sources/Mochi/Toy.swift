@@ -1,14 +1,10 @@
-import AppKit
-
-extension NSWindow.Level {
-    static let toy = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 2)
-}
+import Foundation
 
 /// A yarn ball. Drag it around and the cats go wild; let go and it bounces and rolls.
 final class Toy {
     enum State { case flying, rolling, resting, held, caught }
 
-    let panel: CatPanel
+    let sprite: Sprite
     private let view: ToyView
     private(set) var scale: CGFloat
     private(set) var p = CGPoint.zero          // centre of the ball, CG coords
@@ -26,10 +22,10 @@ final class Toy {
 
     init(scale: CGFloat) {
         self.scale = scale
-        panel = CatPanel(size: CGSize(width: Toy.viewSide * scale, height: Toy.viewSide * scale))
-        panel.level = .toy
-        view = ToyView(frame: NSRect(origin: .zero, size: panel.frame.size))
-        panel.contentView = view
+        sprite = platform.makeSprite(size: CGSize(width: Toy.viewSide * scale, height: Toy.viewSide * scale))
+        sprite.level = .toy
+        view = ToyView()
+        sprite.content = view
         view.toy = self
     }
 
@@ -40,9 +36,7 @@ final class Toy {
 
     func setScale(_ s: CGFloat) {
         scale = s
-        let size = CGSize(width: Toy.viewSide * s, height: Toy.viewSide * s)
-        panel.setContentSize(size)
-        view.frame = NSRect(origin: .zero, size: size)
+        sprite.size = CGSize(width: Toy.viewSide * s, height: Toy.viewSide * s)
     }
 
     func show(at point: CGPoint) {
@@ -52,14 +46,14 @@ final class Toy {
         surface = nil
         visible = true
         place()
-        panel.orderFrontRegardless()
+        sprite.orderFront()
     }
 
     func hide() {
         visible = false
         holder = nil
         state = .flying
-        panel.orderOut(nil)
+        sprite.orderOut()
     }
 
     // MARK: Cats
@@ -127,7 +121,7 @@ final class Toy {
         place()
         updateMouse()
         // A ball lying still doesn't need redrawing (the strand settles within half a second).
-        if state != .resting || restingFor < 0.5 { view.needsDisplay = true }
+        if state != .resting || restingFor < 0.5 { sprite.setNeedsDisplay() }
     }
 
     private func fly(_ dt: CGFloat) {
@@ -182,8 +176,8 @@ final class Toy {
     private func place() {
         let side = Toy.viewSide * scale
         let o = CGPoint(x: ((p.x - side / 2) * 2).rounded() / 2,
-                        y: ((Coords.primaryHeight - p.y - side / 2) * 2).rounded() / 2)
-        if panel.frame.origin != o { panel.setFrameOrigin(o) }
+                        y: ((p.y + side / 2) * 2).rounded() / 2 - side)
+        if sprite.origin != o { sprite.origin = o }
     }
 
     // MARK: Mouse
@@ -191,7 +185,7 @@ final class Toy {
     private func updateMouse() {
         let m = Coords.mouse
         let over = hypot(m.x - p.x, m.y - p.y) < r + 8 * scale || state == .held
-        if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
+        if sprite.clickThrough == over { sprite.clickThrough = !over }
     }
 
     func mouseDown() {
@@ -215,13 +209,13 @@ final class Toy {
     }
 }
 
-final class ToyView: BitmapView {
+final class ToyView: SpriteContent {
     weak var toy: Toy?
 
-    override func mouseDown(with event: NSEvent) { toy?.mouseDown() }
-    override func mouseUp(with event: NSEvent) { toy?.mouseUp() }
+    func mouseDown() { toy?.mouseDown() }
+    func mouseUp() { toy?.mouseUp() }
 
-    override func render(_ ctx: CGContext) {
+    func draw(_ ctx: CGContext) {
         guard let toy else { return }
         Self.paint(ctx, scale: toy.scale, v: toy.v, time: toy.time, spin: toy.spin,
                    grounded: toy.state == .resting || toy.state == .rolling)
