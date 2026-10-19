@@ -1,0 +1,76 @@
+name: Update Homebrew cask
+
+# When a release is published, point the mochi-cat cask in Mrkh97/homebrew-tap at its Mochi.zip.
+# Pushes with the HOMEBREW_TAP_DEPLOY_KEY secret, a deploy key that can only write to the tap.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (leave empty for the latest release)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency: homebrew-tap
+
+jobs:
+  bump:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Find the release
+        id: release
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Mochi.zip
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          # The zip can still be uploading when the release goes live, so give it a few minutes.
+          for _ in $(seq 30); do
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p Mochi.zip && break
+            sleep 20
+          done
+          if [ ! -f Mochi.zip ]; then
+            echo "::error::Release $TAG has no Mochi.zip"
+            exit 1
+          fi
+          echo "SHA256=$(sha256sum Mochi.zip | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: Mrkh97/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+
+      - name: Update the cask
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          sed -i -E \
+            -e "s/^  version \".*\"$/  version \"$VERSION\"/" \
+            -e "s/^  sha256 \".*\"$/  sha256 \"$SHA256\"/" \
+            Casks/mochi-cat.rb
+          if git diff --quiet; then
+            echo "The cask is already at $VERSION."
+            exit 0
+          fi
+          git diff
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "mochi-cat $VERSION"
+          git push

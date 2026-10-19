@@ -4,13 +4,23 @@
 
 <p align="center">A cat that lives on your desktop. She walks on your windows, hides behind them, naps on them,<br>slips off their edges, and expects to be fed.</p>
 
-<p align="center"><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi.zip"><b>Download for macOS</b></a> · macOS 14 Sonoma or later · Apple silicon and Intel<br><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi-Setup.exe"><b>Download for Windows</b></a> · Windows 10 and 11 · Intel/AMD and ARM</p>
+<p align="center"><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi.zip"><b>Download for macOS</b></a> · macOS 14 Sonoma or later · Apple silicon and Intel · or <a href="#homebrew">Homebrew</a><br><a href="https://github.com/Mrkh97/mochi/releases/latest/download/Mochi-Setup.exe"><b>Download for Windows</b></a> · Windows 10 and 11 · Intel/AMD and ARM</p>
 
 ![Seven cats on a desktop: one strolls along a window, one dangles from a window's edge, one is petted, one peeks over a window from behind, one plays with a yarn ball, one eats, and one sleeps in a cardboard box](docs/demo.gif)
 
 Mochi lives in a cardboard box you can put anywhere on screen. She wakes up, hops out and treats your real windows as furniture. She has no Dock or taskbar button and never steals focus from the app you're using.
 
 ## Install on macOS
+
+### Homebrew
+
+```sh
+brew install --cask mrkh97/tap/mochi-cat
+```
+
+Then open Mochi from your Applications folder and look for the cat face in the menu bar. `brew upgrade --cask mochi-cat` updates her. If you installed Mochi by hand before, add `--force` the first time so Homebrew can replace that copy.
+
+The cask lives in [Mrkh97/homebrew-tap](https://github.com/Mrkh97/homebrew-tap). Because Mochi isn't notarized by Apple yet, the cask clears the quarantine flag macOS puts on downloads, so it opens without the warning described below.
 
 ### Download
 
@@ -39,7 +49,7 @@ cd mochi
 ./build.sh --install    # builds Mochi.app, copies it to /Applications and launches it
 ```
 
-`./build.sh` alone just builds `build/Mochi.app`. `./build.sh --release` makes a universal (Apple silicon + Intel) build and zips it as `build/Mochi.zip`.
+`./build.sh` alone just builds `build/Mochi.app`. `./build.sh --release` makes a universal (Apple silicon + Intel) build and zips it as `build/Mochi.zip`. Publishing a GitHub release with that `Mochi.zip` attached updates the Homebrew cask automatically (see `.github/workflows/homebrew.yml`).
 
 ### Optional: let the windows wobble
 
@@ -53,6 +63,8 @@ Everything else works without it; the windows just stay put. If you rebuild or u
 ### Uninstall
 
 Quit Mochi from its menu and drag Mochi.app to the Trash. To also forget its settings: `defaults delete dev.mochi.desktopcat`.
+
+If you installed with Homebrew: `brew uninstall --cask mochi-cat`, or `brew uninstall --cask --zap mochi-cat` to also forget her settings.
 
 ## Install on Windows
 
