@@ -20,22 +20,13 @@ brew install --cask mrkh97/tap/mochi-cat
 
 Then open Mochi from your Applications folder and look for the cat face in the menu bar. `brew upgrade --cask mochi-cat` updates her. If you installed Mochi by hand before, add `--force` the first time so Homebrew can replace that copy.
 
-The cask lives in [Mrkh97/homebrew-tap](https://github.com/Mrkh97/homebrew-tap). Because Mochi isn't notarized by Apple yet, the cask clears the quarantine flag macOS puts on downloads, so it opens without the warning described below.
+The cask lives in [Mrkh97/homebrew-tap](https://github.com/Mrkh97/homebrew-tap).
 
 ### Download
 
 1. Download [**Mochi.zip**](https://github.com/Mrkh97/mochi/releases/latest/download/Mochi.zip) from the [latest release](https://github.com/Mrkh97/mochi/releases/latest) and unzip it.
-2. Drag **Mochi.app** into your **Applications** folder.
-3. Open it. Mochi isn't notarized by Apple, so the first time macOS will say it can't verify the app. Close that message, then open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to the message about Mochi.
-
-   Or, in Terminal:
-
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/Mochi.app
-   open /Applications/Mochi.app
-   ```
-
-4. Look for the cat face in the menu bar. That's where all the settings are.
+2. Drag **Mochi.app** into your **Applications** folder and open it. Mochi is signed and notarized by Apple, so macOS only asks once whether you want to open an app you downloaded.
+3. Look for the cat face in the menu bar. That's where all the settings are.
 
 To start Mochi with your Mac, turn on **Open at Login** in its menu.
 
@@ -49,7 +40,9 @@ cd mochi
 ./build.sh --install    # builds Mochi.app, copies it to /Applications and launches it
 ```
 
-`./build.sh` alone just builds `build/Mochi.app`. `./build.sh --release` makes a universal (Apple silicon + Intel) build and zips it as `build/Mochi.zip`. Publishing a GitHub release with that `Mochi.zip` attached updates the Homebrew cask automatically (see `.github/workflows/homebrew.yml`).
+`./build.sh` alone just builds `build/Mochi.app`. `./build.sh --release` makes a universal (Apple silicon + Intel) build and zips it as `build/Mochi.zip`.
+
+Without a Developer ID certificate the app is ad-hoc signed, which is all you need to run your own build. With one in your keychain, `build.sh` signs with it, and `--release` also has Apple notarize the app; the top of `build.sh` shows the one-time setup. Publishing a GitHub release with that `Mochi.zip` attached updates the Homebrew cask automatically (see `.github/workflows/homebrew.yml`).
 
 ### Optional: let the windows wobble
 
@@ -58,7 +51,7 @@ When a cat slips off a window, Mochi can physically jiggle that window. Moving o
 1. Turn on **Slips Wobble Real Windows** in Mochi's menu.
 2. Allow Mochi in **System Settings → Privacy & Security → Accessibility**.
 
-Everything else works without it; the windows just stay put. If you rebuild or update the app, macOS may ask for the permission again.
+Everything else works without it; the windows just stay put. The permission carries over when you update Mochi. If you build Mochi yourself without a Developer ID certificate, macOS may ask again after each rebuild.
 
 ### Uninstall
 
